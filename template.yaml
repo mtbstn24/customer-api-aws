@@ -1,32 +1,102 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  thushari-client-app
+  thushari-client-app-v3
 
   A simple API in typescript that uses sample SAM Template to manage customer CRUD operations.
-  
+
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+
+Parameters:
+  DocumentDBUsername:
+    Type: String
+    Description: DocumentDB Cluster username
+  
+  DocumentDBPassword:
+    Type: String
+    Description: DocumentDB Cluster password
+
+  RedisEndpoint:
+    Type: String
+    Description: Redis cluster endpoint
+  
+  RedisPort:
+    Type: String
+    Description: Redis port number
+  
+  S3BucketName:
+    Type: String
+    Description: AWS S3 Bucket name
+
 Globals:
   Function:
-    Timeout: 3
+    Timeout: 30
+    MemorySize: 128
+    Environment:
+      Variables:
+        S3BUCKET_NAME: !Sub '${S3BucketName}'
+        REDIS_ENDPOINT: !Sub '${RedisEndpoint}'
+        REDIS_PORT: !Sub '${RedisPort}'
+        MONGODB_URI: !Sub 'mongodb://wos_admin:${DocumentDBPassword}@wos-documentdb-cluster.cluster-cc0xbblushmf.us-east-2.docdb.amazonaws.com:27017/thushari-customer-app?replicaSet=rs0&readPreference=primaryPreferred&retryWrites=false'
 
 Resources:
-  HelloWorldFunction:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      Policies:
+      - PolicyName: LambdaS3AccessPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:ListBucket
+            Resource:
+            - !Sub arn:aws:s3:::${S3BucketName}
+            - !Sub arn:aws:s3:::${S3BucketName}/*
+
+  ThushariHelloWorldFunction:
     Description: >
       Lambda function that provides an intro to thushari-client-app.
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: controllers/
-      Handler: app.lambdaHandler
+      CodeUri: customer-app/
+      Handler: app.thushari_lambdaHandler
+      # Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: nodejs20.x
       Architectures:
         - x86_64
       Events:
-        HelloWorld:
+        ThushariHelloWorld:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: /hello/
-            Method: get
+            Path: /v1/
+            Method: GET
+      VpcConfig:
+        SecurityGroupIds:
+          # - sg-0e881bd778019ffd6
+          # - sg-030a208a65f9e5909 #documentdbsecurityID
+          - sg-08a9f4d48c8c0ee3b #redissecurityID
+        SubnetIds:
+          # - subnet-03d38fe6c1f6d286f
+          # - subnet-0d253c7c5900231a2
+          # - subnet-024cf15470b6cda12 #documentdb
+          # - subnet-0b9c7cf98e08f6b2d #documentdb
+          - subnet-0d2491d9462945812 #redis
+          - subnet-0ad981a3e5ea52b6b #redis
     Metadata: # Manage esbuild properties
       BuildMethod: esbuild
       BuildProperties:
@@ -34,24 +104,113 @@ Resources:
         Target: "es2020"
         Sourcemap: true
         EntryPoints: 
-        - app.ts
+          - app.js
+        # External :
+        #   - mongoose
+        #   - express-validator
+    
+  ThushariAddCacheFunction:
+    Description: >
+      Lambda function that adds cache.
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: customer-app/
+      Handler: app.thushari_addCacheLambdaHandler
+      # Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Events:
+        ThushariHelloWorld:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /v1/customers/cache/
+            Method: POST
+      VpcConfig:
+        SecurityGroupIds:
+          # - sg-0e881bd778019ffd6
+          # - sg-030a208a65f9e5909 #documentdbsecurityID
+          - sg-08a9f4d48c8c0ee3b #redissecurityID
+        SubnetIds:
+          # - subnet-03d38fe6c1f6d286f
+          # - subnet-0d253c7c5900231a2
+          # - subnet-024cf15470b6cda12 #documentdb
+          # - subnet-0b9c7cf98e08f6b2d #documentdb
+          - subnet-0d2491d9462945812 #redis
+          - subnet-0ad981a3e5ea52b6b #redis
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints: 
+          - app.js
+        # External :
+        #   - mongoose
+        #   - express-validator
   
-  GetAllFunction:
+  ThushariDeleteCacheFunction:
+    Description: >
+      Lambda function that deletes cache.
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: customer-app/
+      Handler: app.thushari_deleteCacheLambdaHandler
+      # Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Events:
+        ThushariHelloWorld:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /v1/customers/cache/{id}
+            Method: DELETE
+      VpcConfig:
+        SecurityGroupIds:
+          # - sg-0e881bd778019ffd6
+          # - sg-030a208a65f9e5909 #documentdbsecurityID
+          - sg-08a9f4d48c8c0ee3b #redissecurityID
+        SubnetIds:
+          # - subnet-03d38fe6c1f6d286f
+          # - subnet-0d253c7c5900231a2
+          # - subnet-024cf15470b6cda12 #documentdb
+          # - subnet-0b9c7cf98e08f6b2d #documentdb
+          - subnet-0d2491d9462945812 #redis
+          - subnet-0ad981a3e5ea52b6b #redis
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints: 
+          - app.js
+  
+  ThushariGetAllFunction:
     Description: >
       Lambda function that returns all customer details.
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: controllers/
-      Handler: getAllCustomer.lambdaHandler
+      CodeUri: customer-app/
+      Handler: app.thushari_getAllCustomerLambdaHandler
+      Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: nodejs20.x
       Architectures:
         - x86_64
       Events:
-        HelloWorld:
+        ThushariHelloWorld:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: /customers/
-            Method: get
+            Path: /v1/customers/
+            Method: GET
+      VpcConfig:
+        SecurityGroupIds:
+          - sg-030a208a65f9e5909
+        SubnetIds:
+          - subnet-024cf15470b6cda12
+          - subnet-0b9c7cf98e08f6b2d
     Metadata: # Manage esbuild properties
       BuildMethod: esbuild
       BuildProperties:
@@ -59,24 +218,31 @@ Resources:
         Target: "es2020"
         Sourcemap: true
         EntryPoints: 
-        - getAllCustomer.ts
+        - app.js
   
-  GetSingleFunction:
+  ThushariGetOneFunction:
     Description: >
       Lambda function that returns all customer details.
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: controllers/
-      Handler: getCustomer.lambdaHandler
+      CodeUri: customer-app/
+      Handler: app.thushari_getCustomerLambdaHandler
+      Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: nodejs20.x
       Architectures:
         - x86_64
       Events:
-        HelloWorld:
+        ThushariHelloWorld:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: /customers/{id}
-            Method: get
+            Path: /v1/customers/{id}
+            Method: GET
+      VpcConfig:
+        SecurityGroupIds:
+          - sg-030a208a65f9e5909
+        SubnetIds:
+          - subnet-024cf15470b6cda12
+          - subnet-0b9c7cf98e08f6b2d
     Metadata: # Manage esbuild properties
       BuildMethod: esbuild
       BuildProperties:
@@ -84,24 +250,37 @@ Resources:
         Target: "es2020"
         Sourcemap: true
         EntryPoints: 
-        - getCustomer.ts
+          - app.js
 
-  AddCustomerFunction:
+  ThushariAddCustomerFunction:
     Description: >
       Lambda function that adds a new customer details.
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: controllers/
-      Handler: addCustomer.lambdaHandler
+      CodeUri: customer-app/
+      Handler: app.thushari_addCustomerLambdaHandler
+      Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: nodejs20.x
       Architectures:
         - x86_64
       Events:
-        HelloWorld:
+        ThushariHelloWorld:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: /customers/
-            Method: post
+            Path: /v1/customers/
+            Method: POST
+      VpcConfig:
+        SecurityGroupIds:
+          # - sg-0e881bd778019ffd6
+          - sg-030a208a65f9e5909 #documentdbsecurityID
+          # - sg-08a9f4d48c8c0ee3b #redissecurityID
+        SubnetIds:
+          # - subnet-03d38fe6c1f6d286f
+          # - subnet-0d253c7c5900231a2
+          - subnet-024cf15470b6cda12 #documentdb
+          - subnet-0b9c7cf98e08f6b2d #documentdb
+          # - subnet-0d2491d9462945812 #redis
+          # - subnet-0ad981a3e5ea52b6b #redis
     Metadata: # Manage esbuild properties
       BuildMethod: esbuild
       BuildProperties:
@@ -109,15 +288,16 @@ Resources:
         Target: "es2020"
         Sourcemap: true
         EntryPoints: 
-        - addCustomer.ts
+          - app.ts
   
-  UpdateCustomerFunction:
+  ThushariUpdateCustomerFunction:
     Description: >
       Lambda function that updates customer details.
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: controllers/
-      Handler: updateCustomer.lambdaHandler
+      CodeUri: customer-app/
+      Handler: app.thushari_updateCustomerLambdaHandler
+      Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: nodejs20.x
       Architectures:
         - x86_64
@@ -125,8 +305,14 @@ Resources:
         HelloWorld:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: /customers/{id}
-            Method: patch
+            Path: /v1/customers/{id}
+            Method: PATCH
+      VpcConfig:
+        SecurityGroupIds:
+          - sg-030a208a65f9e5909
+        SubnetIds:
+          - subnet-024cf15470b6cda12
+          - subnet-0b9c7cf98e08f6b2d
     Metadata: # Manage esbuild properties
       BuildMethod: esbuild
       BuildProperties:
@@ -134,15 +320,16 @@ Resources:
         Target: "es2020"
         Sourcemap: true
         EntryPoints: 
-        - updateCustomer.ts
+          - app.js
 
-  DeleteCustomerFunction:
+  ThushariDeleteCustomerFunction:
     Description: >
       Lambda function that deletes a customer details.
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: controllers/
-      Handler: deleteCustomer.lambdaHandler
+      CodeUri: customer-app/
+      Handler: app.thushari_deleteCustomerLambdaHandler
+      Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: nodejs20.x
       Architectures:
         - x86_64
@@ -150,8 +337,20 @@ Resources:
         HelloWorld:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: /customers/{id}
-            Method: delete
+            Path: /v1/customers/{id}
+            Method: DELETE
+      VpcConfig:
+        SecurityGroupIds:
+          # - sg-0e881bd778019ffd6
+          - sg-030a208a65f9e5909 #documentdbsecurityID
+          # - sg-08a9f4d48c8c0ee3b #redissecurityID
+        SubnetIds:
+          # - subnet-03d38fe6c1f6d286f
+          # - subnet-0d253c7c5900231a2
+          - subnet-024cf15470b6cda12 #documentdb
+          - subnet-0b9c7cf98e08f6b2d #documentdb
+          # - subnet-0d2491d9462945812 #redis
+          # - subnet-0ad981a3e5ea52b6b #redis
     Metadata: # Manage esbuild properties
       BuildMethod: esbuild
       BuildProperties:
@@ -159,15 +358,16 @@ Resources:
         Target: "es2020"
         Sourcemap: true
         EntryPoints: 
-        - deleteCustomer.ts
+          - app.js
 
-  ImportCustomerFileFunction:
+  ThushariImportCustomerFileFunction:
     Description: >
       Lambda function that adds multiple new customer details from a file.
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: controllers/
-      Handler: importCustomerFile.lambdaHandler
+      CodeUri: customer-app/
+      Handler: app.thushari_importCustomerFileLambdaHandler
+      Role: !GetAtt LambdaExecutionRole.Arn
       Runtime: nodejs20.x
       Architectures:
         - x86_64
@@ -175,8 +375,20 @@ Resources:
         HelloWorld:
           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
           Properties:
-            Path: /customers/import/{file}
-            Method: post
+            Path: /v1/customers/import/{file}
+            Method: POST
+      VpcConfig:
+        SecurityGroupIds:
+          # - sg-0e881bd778019ffd6
+          - sg-030a208a65f9e5909 #documentdbsecurityID
+          # - sg-08a9f4d48c8c0ee3b #redissecurityID
+        SubnetIds:
+          # - subnet-03d38fe6c1f6d286f
+          # - subnet-0d253c7c5900231a2
+          - subnet-024cf15470b6cda12 #documentdb
+          - subnet-0b9c7cf98e08f6b2d #documentdb
+          # - subnet-0d2491d9462945812 #redis
+          # - subnet-0ad981a3e5ea52b6b #redis
     Metadata: # Manage esbuild properties
       BuildMethod: esbuild
       BuildProperties:
@@ -184,27 +396,47 @@ Resources:
         Target: "es2020"
         Sourcemap: true
         EntryPoints: 
-        - importCustomerFile.ts
+          - app.js
+  
+  ThushariImportReadCustomerFileFunction:
+    Description: >
+      Lambda function that reads and parses multiple new customer details from a file.
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: customer-app/
+      Handler: app.thushari_importReadCustomerFileLambdaHandler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: nodejs20.x
+      Architectures:
+        - x86_64
+      Events:
+        HelloWorld:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /v1/customers/import/{file}
+            Method: GET
+      # VpcConfig:
+      #   SecurityGroupIds:
+      #     # - sg-0e881bd778019ffd6
+      #     # - sg-030a208a65f9e5909 #documentdbsecurityID
+      #     # - sg-08a9f4d48c8c0ee3b #redissecurityID
+      #   SubnetIds:
+      #     # - subnet-03d38fe6c1f6d286f
+      #     # - subnet-0d253c7c5900231a2
+      #     # - subnet-024cf15470b6cda12 #documentdb
+      #     # - subnet-0b9c7cf98e08f6b2d #documentdb
+      #     # - subnet-0d2491d9462945812 #redis
+      #     # - subnet-0ad981a3e5ea52b6b #redis
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints: 
+          - app.js
 
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
-  HelloWorldApi:
+  ThushariHelloWorldApi:
     Description: "API Gateway endpoint URL for Prod stage for Hello World function"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/hello/"
-  HelloWorldFunction:
-    Description: "Hello World Lambda Function ARN"
-    Value: !GetAtt HelloWorldFunction.Arn
-  HelloWorldFunctionIamRole:
-    Description: "Implicit IAM Role created for Hello World function"
-    Value: !GetAtt HelloWorldFunctionRole.Arn
-  GetAllApi:
-    Description: "API Gateway endpoint URL for Prod stage for Get All function"
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/customers/"
-  GetAllFunction:
-    Description: "Get All Lambda Function ARN"
-    Value: !GetAtt GetAllFunction.Arn
-  GetAllFunctionIamRole:
-    Description: "Implicit IAM Role created for Get All function"
-    Value: !GetAtt GetAllFunctionRole.Arn
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/v1/"
